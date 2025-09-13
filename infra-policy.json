@@ -6,7 +6,8 @@
       "Action": [
         "s3:*","cloudfront:*","iam:*","logs:*",
         "lambda:*","apigateway:*","dynamodb:*","iot:*",
-        "cognito-idp:*","route53:*","acm:*","events:*","secretsmanager:*"
+        "cognito-idp:*","route53:*","acm:*","events:*","secretsmanager:*",
+        "ssm:*","ecr:*"
       ],
       "Resource": "*"
     }
