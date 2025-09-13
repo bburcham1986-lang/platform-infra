@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["cloudformation:*"], "Resource": "*" },
+    { "Effect": "Allow",
+      "Action": [
+        "s3:*","cloudfront:*","iam:*","logs:*",
+        "lambda:*","apigateway:*","dynamodb:*","iot:*",
+        "cognito-idp:*","route53:*","acm:*","events:*","secretsmanager:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
