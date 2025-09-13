@@ -1,4 +1,4 @@
-import { Stack, StackProps, RemovalPolicy, CfnOutput } from "aws-cdk-lib";
+import { Stack, StackProps, RemovalPolicy, CfnOutput, Duration } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
@@ -17,6 +17,11 @@ export class CdkStack extends Stack {
     const distribution = new cloudfront.Distribution(this, "FrontendCdn", {
       defaultBehavior: { origin: new origins.S3Origin(siteBucket) },
       defaultRootObject: "index.html",
+      // 👇 SPA fallback so /alarms, /admin, etc. serve index.html
+      errorResponses: [
+        { httpStatus: 403, responseHttpStatus: 200, responsePagePath: "/index.html", ttl: Duration.seconds(0) },
+        { httpStatus: 404, responseHttpStatus: 200, responsePagePath: "/index.html", ttl: Duration.seconds(0) },
+      ],
     });
 
     new CfnOutput(this, "BucketName", { value: siteBucket.bucketName });
