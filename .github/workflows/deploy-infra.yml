@@ -1,0 +1,36 @@
+name: Deploy Infra
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  cdk-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+        working-directory: cdk
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::309168475318:role/GitHubDeployRole
+          aws-region: us-east-1
+
+      - name: CDK Bootstrap (safe to re-run)
+        run: npx aws-cdk@2 bootstrap aws://309168475318/us-east-1
+        working-directory: cdk
+
+      - name: CDK Deploy
+        run: npx aws-cdk@2 deploy --all --require-approval never
+        working-directory: cdk
