@@ -1,33 +1,31 @@
-import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 
-const ddb = new DynamoDBClient({});
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.TABLE_NAME!;
 
-function extractFromTopic(topic?: string): string | undefined {
-  if (!topic) return undefined;
-  // expected: devices/{deviceId}/telemetry
-  const parts = topic.split("/");
-  return parts.length >= 3 ? parts[1] : undefined;
-}
-
+// Event arrives from IoT Rule with fields we SELECTed
+// Example: { deviceId:'test-001', ts:1736860800000, tempC:22.4, battery:3.71, mqttTopic:'devices/...', iotTimestamp:... }
 export const handler = async (event: any) => {
   console.log("event:", JSON.stringify(event));
 
-  // Accept either explicit fields or derive deviceId from topic
-  const deviceId = String(event.deviceId ?? extractFromTopic(event.mqttTopic) ?? "");
-  if (!deviceId) throw new Error("Missing deviceId");
+  const deviceId = event.deviceId || "unknown";
+  const ts = Number(event.ts) || Date.now();
 
-  const ts = Number(event.ts ?? Date.now());
-  const ttl = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days
-
-  // Store full payload as JSON string; you can project specific fields later
   const item = {
-    deviceId: { S: deviceId },
-    ts:       { N: String(ts) },
-    data:     { S: JSON.stringify(event) },
-    ttl:      { N: String(ttl) },
+    deviceId,
+    ts,
+    data: JSON.stringify(event),
+    // 30 days TTL
+    ttl: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
   };
 
-  await ddb.send(new PutItemCommand({ TableName: TABLE, Item: item }));
-  return { ok: true };
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: item,
+    })
+  );
+
+  return { statusCode: 200 };
 };
