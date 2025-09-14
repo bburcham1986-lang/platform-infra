@@ -84,7 +84,7 @@ export class CdkStack extends Stack {
 
     // IoT Topic Rule: SELECT all, add topic/timestamp, invoke Lambda
     const topicRule = new iot.CfnTopicRule(this, "TelemetryRule", {
-      ruleName: "ingest-telemetry",
+      ruleName: "ingest_telemetry",
       topicRulePayload: {
         sql: "SELECT *, topic() as mqttTopic, timestamp() as iotTimestamp FROM 'devices/+/telemetry'",
         awsIotSqlVersion: "2016-03-23",
