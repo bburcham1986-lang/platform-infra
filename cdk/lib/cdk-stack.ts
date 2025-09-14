@@ -1,206 +1,197 @@
 // cdk/lib/cdk-stack.ts
 import * as path from "path";
-import {
-  Stack,
-  StackProps,
-  Duration,
-  RemovalPolicy,
-  CfnOutput,
-} from "aws-cdk-lib";
+import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
-
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
-import * as iot from "aws-cdk-lib/aws-iot";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as iot from "aws-cdk-lib/aws-iot";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as nodeLambda from "aws-cdk-lib/aws-lambda-nodejs";
-import * as apigw from "aws-cdk-lib/aws-apigateway";
-import * as cdk from "aws-cdk-lib";
-import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
-import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
+import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
+
+// HTTP API (v2) + Lambda integrations
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import * as apigwv2i from "aws-cdk-lib/aws-apigatewayv2-integrations";
 
-// ---- HTTP API with CORS ----
-const api = new apigwv2.HttpApi(this, "TelemetryApi", {
-  apiName: "TelemetryApi",
-  createDefaultStage: true,
-  corsPreflight: {
-    // Allow your site + local dev
-    allowOrigins: [
-      "https://app.iotcontrol.cloud",
-      "http://localhost:5173",
-    ],
-    allowMethods: [apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.OPTIONS],
-    allowHeaders: ["content-type"],
-  },
-});
-
-// Lambda integrations (reuse your existing handler variables)
-const latestIntegration = new apigwv2i.HttpLambdaIntegration(
-  "LatestIntegration",
-  telemetryApiHandler // <-- your existing lambda handler var
-);
-
-const seriesIntegration = new apigwv2i.HttpLambdaIntegration(
-  "SeriesIntegration",
-  telemetryApiHandler // if you use one lambda for both paths
-);
-
-// Add routes (HTTP API style – no .root here)
-api.addRoutes({
-  path: "/devices/{deviceId}/latest",
-  methods: [apigwv2.HttpMethod.GET],
-  integration: latestIntegration,
-});
-
-api.addRoutes({
-  path: "/devices/{deviceId}/series",
-  methods: [apigwv2.HttpMethod.GET],
-  integration: seriesIntegration,
-});
-
-// Output the URL (api.url is string | undefined, so assert or default)
-new cdk.CfnOutput(this, "ApiUrl", { value: api.url ?? "" });
-
-
-export class CdkStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+export class CdkStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // -----------------------------
-    // Frontend hosting (S3 + CF)
-    // -----------------------------
+    //
+    // -------------------------
+    // Frontend: S3 + CloudFront
+    // -------------------------
+    //
     const siteBucket = new s3.Bucket(this, "FrontendBucket", {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: RemovalPolicy.RETAIN,
-      autoDeleteObjects: false,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
     });
 
     const distribution = new cloudfront.Distribution(this, "FrontendCdn", {
       defaultBehavior: { origin: new origins.S3Origin(siteBucket) },
       defaultRootObject: "index.html",
+      // Make React SPA routes work on refresh (serve index.html for 403/404)
       errorResponses: [
-        // Single-page app routing: rewrite 403/404 to index.html
         {
           httpStatus: 403,
           responseHttpStatus: 200,
           responsePagePath: "/index.html",
-          ttl: Duration.minutes(0),
+          ttl: cdk.Duration.minutes(0),
         },
         {
           httpStatus: 404,
           responseHttpStatus: 200,
           responsePagePath: "/index.html",
-          ttl: Duration.minutes(0),
+          ttl: cdk.Duration.minutes(0),
         },
       ],
     });
 
-    // -----------------------------
-    // Telemetry storage (DynamoDB)
-    // -----------------------------
+    new cdk.CfnOutput(this, "BucketName", { value: siteBucket.bucketName });
+    new cdk.CfnOutput(this, "DistributionId", {
+      value: distribution.distributionId,
+    });
+
+    //
+    // ------------------
+    // DynamoDB Telemetry
+    // ------------------
+    //
     const telemetryTable = new dynamodb.Table(this, "TelemetryTable", {
-      tableName: "telemetry",
       partitionKey: { name: "deviceId", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "ts", type: dynamodb.AttributeType.NUMBER },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: "ttl",
-      removalPolicy: RemovalPolicy.RETAIN, // keep data
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // -----------------------------
-    // Ingest Lambda (IoT -> Lambda)
-    // -----------------------------
-    const telemetryDecoderFn = new nodeLambda.NodejsFunction(
+    //
+    // --------------------
+    // Lambda: IoT Ingestor
+    // --------------------
+    //
+    const telemetryDecoderFn = new nodejs.NodejsFunction(
       this,
       "TelemetryDecoderFn",
       {
-        entry: path.join(__dirname, "../lambda/telemetry-decoder.ts"),
+        entry: path.join(
+          __dirname,
+          "../functions/telemetry-decoder.ts" // <-- adjust if needed
+        ),
+        handler: "handler",
         runtime: lambda.Runtime.NODEJS_20_X,
-        timeout: Duration.seconds(10),
         environment: {
           TABLE_NAME: telemetryTable.tableName,
         },
+        logRetention: logs.RetentionDays.ONE_WEEK,
       }
     );
     telemetryTable.grantWriteData(telemetryDecoderFn);
 
-    // IoT Topic Rule: SELECT all, add topic/timestamp, invoke Lambda
-    const topicRule = new iot.CfnTopicRule(this, "TelemetryRule", {
-      ruleName: "ingest_telemetry",
+    // Allow IoT to invoke the ingest Lambda
+    const iotRuleRole = new iam.Role(this, "IotRuleRole", {
+      assumedBy: new iam.ServicePrincipal("iot.amazonaws.com"),
+    });
+    iotRuleRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["lambda:InvokeFunction"],
+        resources: [telemetryDecoderFn.functionArn],
+      })
+    );
+
+    const iotRule = new iot.CfnTopicRule(this, "TelemetryIngestRule", {
+      ruleName: "ingest_telemetry", // safe name for IoT regex
       topicRulePayload: {
         sql: "SELECT *, topic() as mqttTopic, timestamp() as iotTimestamp FROM 'devices/+/telemetry'",
         awsIotSqlVersion: "2016-03-23",
         ruleDisabled: false,
         actions: [
           {
-            lambda: { functionArn: telemetryDecoderFn.functionArn },
+            lambda: {
+              functionArn: telemetryDecoderFn.functionArn,
+            },
           },
         ],
       },
     });
 
-    // Allow IoT to invoke the Lambda
     telemetryDecoderFn.addPermission("AllowIotInvoke", {
       principal: new iam.ServicePrincipal("iot.amazonaws.com"),
-      sourceArn: topicRule.attrArn,
+      sourceArn: iotRule.attrArn,
     });
 
-    // -----------------------------
-    // Read API (API Gateway + Lambdas)
-    // -----------------------------
-    const getLatestFn = new nodeLambda.NodejsFunction(
+    //
+    // ------------------------
+    // Lambda: Read API (latest/series)
+    // ------------------------
+    //
+    const telemetryApiHandler = new nodejs.NodejsFunction(
       this,
-      "GetLatestTelemetryFn",
+      "TelemetryApiHandler",
       {
-        entry: path.join(__dirname, "../lambda/get-latest.ts"),
+        entry: path.join(
+          __dirname,
+          "../functions/telemetry-api.ts" // <-- adjust if needed
+        ),
+        handler: "handler",
         runtime: lambda.Runtime.NODEJS_20_X,
-        timeout: Duration.seconds(10),
-        environment: { TABLE_NAME: telemetryTable.tableName },
+        environment: {
+          TABLE_NAME: telemetryTable.tableName,
+        },
+        logRetention: logs.RetentionDays.ONE_WEEK,
       }
     );
-    const getSeriesFn = new nodeLambda.NodejsFunction(
-      this,
-      "GetSeriesTelemetryFn",
-      {
-        entry: path.join(__dirname, "../lambda/get-series.ts"),
-        runtime: lambda.Runtime.NODEJS_20_X,
-        timeout: Duration.seconds(10),
-        environment: { TABLE_NAME: telemetryTable.tableName },
-      }
+    telemetryTable.grantReadData(telemetryApiHandler);
+
+    //
+    // ----------------------
+    // HTTP API (v2) + CORS
+    // ----------------------
+    //
+    const telemetryApi = new apigwv2.HttpApi(this, "TelemetryApi", {
+      apiName: "TelemetryApi",
+      createDefaultStage: true,
+      corsPreflight: {
+        allowOrigins: [
+          "https://app.iotcontrol.cloud", // your CloudFront/Route53 site
+          "http://localhost:5173",        // local dev
+        ],
+        allowHeaders: ["content-type"],
+        allowMethods: [
+          apigwv2.CorsHttpMethod.GET,
+          apigwv2.CorsHttpMethod.OPTIONS,
+        ],
+      },
+    });
+
+    const latestIntegration = new apigwv2i.HttpLambdaIntegration(
+      "LatestIntegration",
+      telemetryApiHandler
     );
-    telemetryTable.grantReadData(getLatestFn);
-    telemetryTable.grantReadData(getSeriesFn);
+    const seriesIntegration = new apigwv2i.HttpLambdaIntegration(
+      "SeriesIntegration",
+      telemetryApiHandler
+    );
 
-    // When creating the API:
-const api = new apigwv2.HttpApi(this, "TelemetryApi", {
-  corsPreflight: {
-    allowOrigins: ["https://app.iotcontrol.cloud", "http://localhost:5173"],
-    allowMethods: [apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.OPTIONS],
-    allowHeaders: ["content-type", "authorization"],
-    maxAge: cdk.Duration.days(10),
-  },
-});
+    telemetryApi.addRoutes({
+      path: "/devices/{deviceId}/latest",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: latestIntegration,
+    });
 
-    const devices = api.root.addResource("devices");
-    const byId = devices.addResource("{deviceId}");
-    byId
-      .addResource("latest")
-      .addMethod("GET", new apigw.LambdaIntegration(getLatestFn));
-    byId
-      .addResource("series")
-      .addMethod("GET", new apigw.LambdaIntegration(getSeriesFn));
+    telemetryApi.addRoutes({
+      path: "/devices/{deviceId}/series",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: seriesIntegration,
+    });
 
-    // -----------------------------
-    // Outputs (used by your scripts)
-    // -----------------------------
-    new CfnOutput(this, "BucketName", { value: siteBucket.bucketName });
-    new CfnOutput(this, "DistributionId", { value: distribution.distributionId });
-    new CfnOutput(this, "ApiUrl", { value: api.url });
+    new cdk.CfnOutput(this, "ApiUrl", {
+      value: telemetryApi.apiEndpoint,
+    });
   }
 }
