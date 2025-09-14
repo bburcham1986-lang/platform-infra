@@ -19,6 +19,10 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as nodeLambda from "aws-cdk-lib/aws-lambda-nodejs";
 import * as apigw from "aws-cdk-lib/aws-apigateway";
+import * as cdk from "aws-cdk-lib";
+import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
+import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
+
 
 export class CdkStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -129,13 +133,15 @@ export class CdkStack extends Stack {
     telemetryTable.grantReadData(getLatestFn);
     telemetryTable.grantReadData(getSeriesFn);
 
-    const api = new apigw.RestApi(this, "DataApi", {
-      restApiName: "data-api",
-      defaultCorsPreflightOptions: {
-        allowOrigins: apigw.Cors.ALL_ORIGINS, // tighten later
-        allowMethods: apigw.Cors.ALL_METHODS,
-      },
-    });
+    // When creating the API:
+const api = new apigwv2.HttpApi(this, "TelemetryApi", {
+  corsPreflight: {
+    allowOrigins: ["https://app.iotcontrol.cloud", "http://localhost:5173"],
+    allowMethods: [apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.OPTIONS],
+    allowHeaders: ["content-type", "authorization"],
+    maxAge: cdk.Duration.days(10),
+  },
+});
 
     const devices = api.root.addResource("devices");
     const byId = devices.addResource("{deviceId}");
