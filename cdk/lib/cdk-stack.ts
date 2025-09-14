@@ -33,7 +33,7 @@ export class CdkStack extends cdk.Stack {
 
     const distribution = new cloudfront.Distribution(this, "FrontendCdn", {
       // Use modern origin class per deprecation notice
-      defaultBehavior: { origin: new origins.S3BucketOrigin(siteBucket) },
+      defaultBehavior: { origin: new origins.S3Origin(siteBucket) },
       defaultRootObject: "index.html",
       errorResponses: [
         { httpStatus: 403, responseHttpStatus: 200, responsePagePath: "/index.html", ttl: cdk.Duration.minutes(0) },
