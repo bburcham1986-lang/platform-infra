@@ -22,6 +22,50 @@ import * as apigw from "aws-cdk-lib/aws-apigateway";
 import * as cdk from "aws-cdk-lib";
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
+import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
+import * as apigwv2i from "aws-cdk-lib/aws-apigatewayv2-integrations";
+
+// ---- HTTP API with CORS ----
+const api = new apigwv2.HttpApi(this, "TelemetryApi", {
+  apiName: "TelemetryApi",
+  createDefaultStage: true,
+  corsPreflight: {
+    // Allow your site + local dev
+    allowOrigins: [
+      "https://app.iotcontrol.cloud",
+      "http://localhost:5173",
+    ],
+    allowMethods: [apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.OPTIONS],
+    allowHeaders: ["content-type"],
+  },
+});
+
+// Lambda integrations (reuse your existing handler variables)
+const latestIntegration = new apigwv2i.HttpLambdaIntegration(
+  "LatestIntegration",
+  telemetryApiHandler // <-- your existing lambda handler var
+);
+
+const seriesIntegration = new apigwv2i.HttpLambdaIntegration(
+  "SeriesIntegration",
+  telemetryApiHandler // if you use one lambda for both paths
+);
+
+// Add routes (HTTP API style – no .root here)
+api.addRoutes({
+  path: "/devices/{deviceId}/latest",
+  methods: [apigwv2.HttpMethod.GET],
+  integration: latestIntegration,
+});
+
+api.addRoutes({
+  path: "/devices/{deviceId}/series",
+  methods: [apigwv2.HttpMethod.GET],
+  integration: seriesIntegration,
+});
+
+// Output the URL (api.url is string | undefined, so assert or default)
+new cdk.CfnOutput(this, "ApiUrl", { value: api.url ?? "" });
 
 
 export class CdkStack extends Stack {
