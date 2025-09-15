@@ -59,7 +59,7 @@ export class CdkStack extends cdk.Stack {
     // Lambda: IoT Ingestor
     // --------------------
     const telemetryDecoderFn = new nodejs.NodejsFunction(this, "TelemetryDecoderFn", {
-      entry: path.join(__dirname, "../functions/telemetry-decoder.ts"), // cdk/functions/telemetry-decoder.ts
+      entry: path.resolve(__dirname, "../../functions/telemetry-decoder.ts"), // cdk/functions/telemetry-decoder.ts
       handler: "handler",
       runtime: lambda.Runtime.NODEJS_20_X,
       environment: { TABLE_NAME: telemetryTable.tableName },
