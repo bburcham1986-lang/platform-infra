@@ -88,7 +88,7 @@ export class CdkStack extends cdk.Stack {
     // Lambda: Read API handler
     // ------------------------
     const telemetryApiHandler = new nodejs.NodejsFunction(this, "TelemetryApiHandler", {
-      entry: path.join(__dirname, "../functions/telemetry-api.ts"), // cdk/functions/telemetry-api.ts
+      entry: path.resolve(__dirname, "../../functions/telemetry-decoder.ts"), entry: path.resolve(__dirname, "../../functions/telemetry-api.ts"),
       handler: "handler",
       runtime: lambda.Runtime.NODEJS_20_X,
       environment: { TABLE_NAME: telemetryTable.tableName },
